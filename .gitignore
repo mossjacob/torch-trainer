@@ -1,0 +1,7 @@
+.idea/
+
+dist/
+
+torte/torte.egg-info/
+
+torte/__pycache__/
