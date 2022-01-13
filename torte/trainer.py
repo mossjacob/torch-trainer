@@ -102,7 +102,7 @@ class Trainer:
                 print('Epoch %03d/%03d - Loss: %.2f ' % (
                     self.num_epochs + 1, end_epoch, epoch_loss), end='')
                 if len(loss_breakdown) > 1:
-                    print(' '.join(map(lambda l: '%.2f' % l, loss_breakdown)), end='')
+                    print(' '.join(map(lambda l: '%.2f' % l, loss_breakdown[1:])), end='')
 
                 self.print_extra()
                 if self.checkpoint_dir is not None:
@@ -152,6 +152,7 @@ class Trainer:
         if save_optimizer:
             for i, optimizer in enumerate(self.optimizers):
                 torch.save(optimizer.state_dict(), path / 'optim[{i}].pt')
+        return timestamp
 
     def load(self, file_prefix='model', timestamp=''):
         """
