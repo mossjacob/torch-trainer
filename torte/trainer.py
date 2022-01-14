@@ -41,6 +41,7 @@ class Trainer:
         self.model = model
         self.num_epochs = 0
         self.optimizers = optimizers
+        self.dataset = dataset
         self.use_natural_gradient = len(self.optimizers) > 1
         self.batch_size = batch_size
 
@@ -54,14 +55,11 @@ class Trainer:
         np.random.shuffle(indices)
         valid_split = int(np.floor(valid_size * dataset_size))
         test_split = int(np.floor(test_size * dataset_size))
-        self.valid_indices, self.test_indices = indices[:valid_split], indices[valid_split:test_split + valid_split]
+        self.valid_indices = indices[:valid_split]
+        self.test_indices = indices[valid_split:test_split + valid_split]
         self.train_indices = indices[test_split + valid_split:]
-        valid_data = Subset(dataset, self.valid_indices)
-        test_data = Subset(dataset, self.test_indices)
-        train_data = Subset(dataset, self.train_indices)
-        self.test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
-        self.valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
-        self.data_loader = DataLoader(train_data, batch_size=batch_size, shuffle=False)
+        self.data_loader = self.test_loader = self.valid_loader = None
+        self.set_loaders()
 
         self.losses = None
         self.train_mask = train_mask
@@ -72,6 +70,14 @@ class Trainer:
         if track_parameters is not None:
             named_params = dict(model.named_parameters())
             self.parameter_trace = {key: [named_params[key].detach()] for key in track_parameters}
+
+    def set_loaders(self):
+        valid_data = Subset(self.dataset, self.valid_indices)
+        test_data = Subset(self.dataset, self.test_indices)
+        train_data = Subset(self.dataset, self.train_indices)
+        self.test_loader = DataLoader(test_data, batch_size=self.batch_size, shuffle=False)
+        self.valid_loader = DataLoader(valid_data, batch_size=self.batch_size, shuffle=False)
+        self.data_loader = DataLoader(train_data, batch_size=self.batch_size, shuffle=False)
 
     def train(self, epochs=20, report_interval=1, reporter_callback=None, **kwargs):
         """
@@ -135,9 +141,19 @@ class Trainer:
                 if key in self.parameter_trace:
                     self.parameter_trace[key].append(params[key].detach().clone())
 
-    def save(self, file_prefix='model', save_model=True, save_losses=True, save_optimizer=False):
+    def save(self, folder_prefix='model', save_model=True, save_losses=True, save_optimizer=False, additional=None):
+        """
+        Save the model and trainer information.
+
+        :param folder_prefix: the folder name containing the saved files will be folder_prefix-timestamp
+        :param save_model:
+        :param save_losses:
+        :param save_optimizer:
+        :param additional: object or list of objects to save alongside the default items.
+        :return:
+        """
         timestamp = int(time())
-        path = Path(f'./{file_prefix}-{timestamp}/')
+        path = Path(f'./{folder_prefix}-{timestamp}/')
         if path.exists():
             raise IOError('Path seems to already exist.')
         path.mkdir()
@@ -152,6 +168,9 @@ class Trainer:
         if save_optimizer:
             for i, optimizer in enumerate(self.optimizers):
                 torch.save(optimizer.state_dict(), path / 'optim[{i}].pt')
+
+        if additional is not None:
+            torch.save(additional, path / 'additional.pt')
         return timestamp
 
     def load(self, file_prefix='model', timestamp=''):
@@ -160,15 +179,18 @@ class Trainer:
 
         :param file_prefix:
         :param timestamp:
-        :return: list(model, losses, optimizer), each only present if file is found
         """
         path = Path(f'./{file_prefix}-{timestamp}/')
-        modules = dict()
-        objects = ['model', 'indices', 'losses', *[f'optim[{i}]' for i in range(len(self.optimizers))]]
-        for object in objects:
-            obj_path = Path(path / f'{object}.pt')
-            print(obj_path, obj_path.exists())
-            if obj_path.exists():
-                modules[object] = torch.load(obj_path)
-
-        return modules
+        print('Loading from', path)
+        if (path / 'indices.pt').exists():
+            indices = torch.load(path / 'indices.pt')
+            self.train_indices, self.test_indices, self.valid_indices = indices
+            self.set_loaders()
+        if (path / 'model.pt').exists():
+            state_dict = torch.load(path / 'model.pt', map_location=torch.device('cpu'))
+            self.model.load_state_dict(state_dict)
+        if (path / 'losses.pt').exists():
+            self.losses = torch.load(path / 'losses.pt')
+        for i, optim in enumerate([f'optim[{i}].pt' for i in range(len(self.optimizers))]):
+            if (path / optim).exists():
+                self.optimizers[i].load_state_dict(torch.load(path / optim))

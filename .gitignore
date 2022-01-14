@@ -5,3 +5,5 @@ dist/
 torte/torte.egg-info/
 
 torte/__pycache__/
+
+.DS_Store
