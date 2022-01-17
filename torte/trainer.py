@@ -10,6 +10,8 @@ from torch.nn import Module
 from time import time
 from pathlib import Path
 
+from epoch_results import EpochResults
+
 
 class Trainer:
     """
@@ -93,14 +95,20 @@ class Trainer:
         end_epoch = self.num_epochs+epochs
 
         for epoch in range(epochs):
-            epoch_loss = self.single_epoch(epoch=self.num_epochs, **kwargs)
+            epoch_results = self.single_epoch(epoch=self.num_epochs, **kwargs)
+            if isinstance(epoch_results, EpochResults):
+                epoch_loss = epoch_results.loss
+                loss_breakdown = epoch_results.metrics
+            else:
+                # deprecated
+                if isinstance(epoch_loss, Iterable):
+                    epoch_loss, loss_breakdown = epoch_loss
+                else:
+                    loss_breakdown = [epoch_loss]
+                loss_breakdown = {i: loss for i, loss in enumerate(loss_breakdown)}
             t = time()
             times.append((t, epoch_loss))
 
-            if isinstance(epoch_loss, Iterable):
-                epoch_loss, loss_breakdown = epoch_loss
-            else:
-                loss_breakdown = [epoch_loss]
 
             if (epoch % report_interval) == 0:
                 if reporter_callback is not None:
@@ -108,7 +116,7 @@ class Trainer:
                 print('Epoch %03d/%03d - Loss: %.2f ' % (
                     self.num_epochs + 1, end_epoch, epoch_loss), end='')
                 if len(loss_breakdown) > 1:
-                    print(' '.join(map(lambda l: '%.2f' % l, loss_breakdown[1:])), end='')
+                    print(' '.join([f'{label}=%.2f' % l for label, l in loss_breakdown.items()]), end='')
 
                 self.print_extra()
                 if self.checkpoint_dir is not None:
@@ -125,7 +133,7 @@ class Trainer:
         return times
 
     @abstractmethod
-    def single_epoch(self, epoch=0, **kwargs):
+    def single_epoch(self, epoch=0, **kwargs) -> EpochResults:
         raise NotImplementedError
 
     def set_optimizers(self, optimizers):
@@ -171,16 +179,15 @@ class Trainer:
 
         if additional is not None:
             torch.save(additional, path / 'additional.pt')
-        return timestamp
+        return path
 
-    def load(self, file_prefix='model', timestamp=''):
+    def load(self, file_prefix='model'):
         """
         Loads optionally the model state dict, losses array, optimizer state dict, in that order.
 
         :param file_prefix:
-        :param timestamp:
         """
-        path = Path(f'./{file_prefix}-{timestamp}/')
+        path = Path(f'./{file_prefix}/')
         print('Loading from', path)
         if (path / 'indices.pt').exists():
             indices = torch.load(path / 'indices.pt')
