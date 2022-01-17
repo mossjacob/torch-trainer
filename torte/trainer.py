@@ -9,6 +9,7 @@ from torch.utils.data import Subset
 from torch.nn import Module
 from time import time
 from pathlib import Path
+from dataclasses import is_dataclass
 
 from epoch_results import EpochResults
 
@@ -96,16 +97,18 @@ class Trainer:
 
         for epoch in range(epochs):
             epoch_results = self.single_epoch(epoch=self.num_epochs, **kwargs)
-            if isinstance(epoch_results, EpochResults):
+            if is_dataclass(epoch_results) and hasattr(epoch_results, 'loss'):
                 epoch_loss = epoch_results.loss
                 loss_breakdown = epoch_results.metrics
             else:
                 # deprecated
-                if isinstance(epoch_loss, Iterable):
-                    epoch_loss, loss_breakdown = epoch_loss
+                if isinstance(epoch_results, Iterable):
+                    epoch_loss, loss_breakdown = epoch_results
                 else:
+                    epoch_loss = epoch_results
                     loss_breakdown = [epoch_loss]
                 loss_breakdown = {i: loss for i, loss in enumerate(loss_breakdown)}
+
             t = time()
             times.append((t, epoch_loss))
 
@@ -116,12 +119,13 @@ class Trainer:
                 print('Epoch %03d/%03d - Loss: %.2f ' % (
                     self.num_epochs + 1, end_epoch, epoch_loss), end='')
                 if len(loss_breakdown) > 1:
-                    print(' '.join([f'{label}=%.2f' % l for label, l in loss_breakdown.items()]), end='')
+                    print(' '.join([f'{label}: %.2f' % l for label, l in loss_breakdown.items()]), end='')
 
                 self.print_extra()
                 if self.checkpoint_dir is not None:
                     self.model.save(self.checkpoint_dir / f'epoch{epoch}')
-            losses.append(loss_breakdown)
+
+            losses.append([epoch_loss] + list(loss_breakdown.values()))
 
             self.after_epoch()
             self.num_epochs += 1
